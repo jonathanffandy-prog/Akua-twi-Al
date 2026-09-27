@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Akua — Twi AI Voice Assistant</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#f6f3ee;color:#1d1d1d}
+.app{max-width:720px;margin:auto;min-height:100vh;display:flex;flex-direction:column}
+.top{padding:18px 16px;background:#173f35;color:white;position:sticky;top:0;z-index:2}
+.brand{font-size:24px;font-weight:800}
+.sub{opacity:.8;font-size:13px;margin-top:3px}
+.status{font-size:12px;margin-top:9px}
+.chat{flex:1;padding:18px 14px 110px;overflow:auto}
+.msg{max-width:86%;padding:12px 14px;border-radius:18px;margin:10px 0;line-height:1.45;white-space:pre-wrap}
+.you{margin-left:auto;background:#dceee8;border-bottom-right-radius:5px}
+.akua{background:white;border:1px solid #e6e0d7;border-bottom-left-radius:5px}
+.bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #ddd;padding:10px;display:flex;gap:8px;max-width:720px;margin:auto}
+.bar input{flex:1;border:1px solid #ccc;border-radius:24px;padding:12px 14px;font-size:16px;outline:none}
+.btn{border:0;border-radius:50%;width:48px;height:48px;font-size:20px;cursor:pointer;background:#173f35;color:white}
+.send{border-radius:24px;width:58px}
+.recording{background:#b3261e}
+.speak{background:#eee;color:#173f35;width:38px;height:38px;font-size:16px}
+.welcome{text-align:center;padding:60px 20px;color:#666}
+.welcome h2{color:#173f35}
+.small{font-size:12px;opacity:.65;text-align:center;padding:8px}
+</style>
+</head>
+
+<body>
+<main class="app">
+
+<header class="top">
+<div class="brand">Akua</div>
+<div class="sub">Your Ghanaian Twi AI voice assistant</div>
+<div id="status" class="status">Connecting…</div>
+</header>
+
+<section id="chat" class="chat">
+<div id="welcome" class="welcome">
+<h2>Agoo 👋</h2>
+<p>Me din de Akua. Wo pɛ sɛ yɛkasa?</p>
+<p class="small">Type a message or tap 🎙️ and speak.</p>
+</div>
+</section>
+
+<form id="bar" class="bar">
+<input id="input" autocomplete="off" placeholder="Kyerɛw anaa ka kyerɛ Akua…">
+<button type="button" id="mic" class="btn" title="Talk">🎙️</button>
+<button class="btn send" title="Send">➤</button>
+</form>
+
+</main>
+
+<script>
+const API=window.location.origin;
+
+const chat=document.getElementById('chat');
+const input=document.getElementById('input');
+const bar=document.getElementById('bar');
+const mic=document.getElementById('mic');
+const statusEl=document.getElementById('status');
+
+let recorder=null;
+let chunks=[];
+let recording=false;
+
+function add(text,who){
+document.getElementById('welcome')?.remove();
+
+const d=document.createElement('div');
+d.className='msg '+who;
+d.textContent=text;
+
+chat.appendChild(d);
+
+if(who==='akua'){
+const b=document.createElement('button');
+b.className='btn speak';
+b.textContent='🔊';
+b.title='Listen';
+b.onclick=()=>speak(text);
+
+d.appendChild(document.createTextNode(' '));
+d.appendChild(b);
+}
+
+chat.scrollTop=chat.scrollHeight;
+}
+
+async function health(){
+try{
+const r=await fetch(API+'/api/health');
+const j=await r.json();
+
+statusEl.textContent=j.ok?'● Online':'● Limited';
+statusEl.style.color=j.ok?'#b9f3d9':'#ffd59a';
+
+}catch(e){
+statusEl.textContent='● Connection problem';
+statusEl.style.color='#ffb3ad';
+}
+}
+
+async function chatAI(text){
+const r=await fetch(API+'/api/chat',{
+method:'POST',
+headers:{'Content-Type':'application/json'},
+body:JSON.stringify({message:text})
+});
+
+if(!r.ok)throw Error('chat');
+
+return (await r.json()).reply;
+}
+
+async function speak(text){
+try{
+const r=await fetch(API+'/api/tts',{
+method:'POST',
+headers:{'Content-Type':'application/json'},
+body:JSON.stringify({text})
+});
+
+if(!r.ok)throw Error('tts');
+
+const blob=await r.blob();
+const url=URL.createObjectURL(blob);
+const a=new Audio(url);
+
+a.play().catch(()=>{});
+
+a.onended=()=>{
+URL.revokeObjectURL(url);
+};
+
+}catch(e){
+
+if('speechSynthesis' in window){
+speechSynthesis.cancel();
+
+const u=new SpeechSynthesisUtterance(text);
+u.lang='en-GH';
+
+speechSynthesis.speak(u);
+}
+
+}
+}
+
+async function send(text){
+
+text=(text||'').trim();
+
+if(!text)return;
+
+input.value='';
+
+add(text,'you');
+
+const wait=document.createElement('div');
+
+wait.className='msg akua';
+wait.textContent='Akua is thinking…';
+
+chat.appendChild(wait);
+
+chat.scrollTop=chat.scrollHeight;
+
+try{
+
+const reply=await chatAI(text);
+
+wait.remove();
+
+add(reply,'akua');
+
+speak(reply);
+
+}catch(e){
+
+wait.textContent='Mepa wo kyɛw, connection no yɛ den kakra. San sɔ hwɛ.';
+
+}
+}
+
+bar.onsubmit=e=>{
+e.preventDefault();
+send(input.value);
+};
+
+async function startRec(){
+
+if(!navigator.mediaDevices?.getUserMedia){
+alert('Your browser does not support microphone recording.');
+return;
+}
+
+try{
+
+const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+
+recorder=new MediaRecorder(stream);
+
+chunks=[];
+
+recorder.ondataavailable=e=>{
+if(e.data.size)chunks.push(e.data);
+};
+
+recorder.onstop=async()=>{
+
+stream.getTracks().forEach(t=>t.stop());
+
+mic.textContent='🎙️';
+mic.classList.remove('recording');
+
+recording=false;
+
+const blob=new Blob(
+chunks,
+{type:recorder.mimeType||'audio/webm'}
+);
+
+const fd=new FormData();
+
+fd.append('audio',blob,'akua.webm');
+
+try{
+
+statusEl.textContent='Transcribing…';
+
+const r=await fetch(API+'/api/asr',{
+method:'POST',
+body:fd
+});
+
+const j=await r.json();
+
+if(!r.ok)throw Error(j.error||'asr');
+
+if(j.text){
+await send(j.text);
+}else{
+alert('I could not understand that recording.');
+}
+
+}catch(e){
+
+alert(e.message||'Voice recognition is unavailable.');
+
+}finally{
+
+health();
+
+}
+
+};
+
+recorder.start();
+
+recording=true;
+
+mic.textContent='⏹️';
+mic.classList.add('recording');
+
+statusEl.textContent='Listening…';
+
+}catch(e){
+
+alert('Please allow microphone access, then try again.');
+
+}
+
+}
+
+mic.onclick=()=>{
+if(recording){
+recorder.stop();
+}else{
+startRec();
+}
+};
+
+health();
+</script>
+
+</body>
+  </html>
